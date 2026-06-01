@@ -217,12 +217,10 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# R6 Operator Tracker — generated / derived data (regeneratable, do not commit)
-data/siege.db
+# R6 Operator Tracker — regeneratable, do not commit
 data/siege.db-shm
 data/siege.db-wal
 data/competitions/*/raw/
-data/competitions/*/workbook.xlsx
 
 # Source data committed to git (critical reference, not regeneratable):
 #   data/competitions.json           — competition catalog + match seeds
