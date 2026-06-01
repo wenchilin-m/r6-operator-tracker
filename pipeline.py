@@ -24,6 +24,16 @@ OPERATOR_CANON = _ops_ref["canon"]
 _IMG_RE = re.compile(r"<img\b[^>]*>", re.I)
 _ALT_RE = re.compile(r'alt="([^"]+)"')
 
+# Old site names returned by siege.gg for historical matches → canonical current names
+_SITE_CANON = {
+    "Armory/Archives": "Archives/Armory",
+    "Kitchen/Trophy":  "Kitchen/Dining",
+    "Lobby/Piano":     "Exposition/Piano",
+}
+
+def _canon_site(name):
+    return _SITE_CANON.get(name, name) if name else name
+
 
 # ── SQLite ────────────────────────────────────────────────────────────────────
 
@@ -158,7 +168,7 @@ def normalize_match(match, comp_id, match_id):
                 })
 
         for round_num, rnd in enumerate(grounds, start=1):
-            site = (rnd.get("site") or {}).get("name")
+            site = _canon_site((rnd.get("site") or {}).get("name"))
             if rnd.get("def_win") is not None and not rnd.get("is_tie"):
                 rounds.append({
                     "comp_id": comp_id, "match_id": match_id,
