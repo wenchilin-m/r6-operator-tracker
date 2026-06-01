@@ -1,0 +1,32 @@
+{
+  "map_order": [
+    "Club House", "Kafe", "Chalet", "Border", "Bank",
+    "Consulate", "Nighthaven Labs", "Fortress", "Lair"
+  ],
+  "map_sites": {
+    "Club House": ["Church/Arsenal", "Master/Gym", "Cash/CCTV"],
+    "Kafe": ["Bar/Cocktail", "Mining/Dining", "Reading/Dining", "Service/Cooking"],
+    "Chalet": ["Bar/Gaming", "Kitchen/Dining", "Master/Office", "Wine Cellar/Snowmobile"],
+    "Border": ["Archives/Armory", "Supply/Customs", "Ventilation/Workshop", "Tellers/Bathroom"],
+    "Bank": ["Lockers/CCTV", "CEO/Lounge", "Open Area/Kitchen", "Tellers/Archives"],
+    "Consulate": ["Garage/Cafeteria", "CEO/Meeting", "Exposition/Piano", "Servers/Tellers"],
+    "Nighthaven Labs": ["Command Center/Servers", "Assembly/Tank", "Storage/Control Room", "Kitchen/Cafeteria"],
+    "Fortress": ["Waiting Room/Cafeteria", "Commander's/Bathroom", "Dormitory/Games Room"],
+    "Lair": ["Master/R6 Room", "Lab/Lab Support", "Bunks/Briefing"],
+    "Skyscraper": ["Tea/Karaoke", "Kitchen/BBQ", "Office/Exhibition", "Master/Bathroom"],
+    "Oregon": ["Laundry/Supply", "Dorms/Kids", "Meeting Hall/Kitchen", "Kitchen/Dining"]
+  },
+  "map_picks_layout": [
+    ["Club House", ["Church/Arsenal", "Master/Gym", "Cash/CCTV"]],
+    ["Kafe", ["Service/Cooking", "Reading/Dining", "Bar/Cocktail", "Mining/Dining"]],
+    ["Chalet", ["Kitchen/Dining", "Master/Office", "Bar/Gaming", "Wine Cellar/Snowmobile"]],
+    ["Skyscraper", ["Tea/Karaoke", "Kitchen/BBQ", "Office/Exhibition", "Master/Bathroom"]],
+    ["Border", ["Archives/Armory", "Supply/Customs", "Tellers/Bathroom", "Ventilation/Workshop"]],
+    ["Bank", ["Lockers/CCTV", "CEO/Lounge", "Open Area/Kitchen", "Tellers/Archives"]],
+    ["Oregon", ["Laundry/Supply", "Dorms/Kids", "Meeting Hall/Kitchen", "Kitchen/Dining"]],
+    ["Consulate", ["CEO/Meeting", "Garage/Cafeteria", "Exposition/Piano", "Servers/Tellers"]],
+    ["Nighthaven Labs", ["Storage/Control Room", "Assembly/Tank", "Command Center/Servers", "Kitchen/Cafeteria"]],
+    ["Fortress", ["Commander's/Bathroom", "Dormitory/Games Room", "Waiting Room/Cafeteria"]],
+    ["Lair", ["Master/R6 Room", "Lab/Lab Support", "Bunks/Briefing"]]
+  ]
+}
