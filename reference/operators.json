@@ -1,0 +1,30 @@
+{
+  "side": {
+    "Sledge": "Attack", "Thatcher": "Attack", "Ash": "Attack", "Thermite": "Attack",
+    "Twitch": "Attack", "Monty": "Attack", "Glaz": "Attack", "Fuze": "Attack",
+    "Blitz": "Attack", "Iq": "Attack", "Buck": "Attack", "Blackbeard": "Attack",
+    "Capitao": "Attack", "Hibana": "Attack", "Jackal": "Attack", "Ying": "Attack",
+    "Zofia": "Attack", "Dokk": "Attack", "Lion": "Attack", "Finka": "Attack",
+    "Maverick": "Attack", "Nomad": "Attack", "Gridlock": "Attack", "Nokk": "Attack",
+    "Amaru": "Attack", "Kali": "Attack", "Iana": "Attack", "Ace": "Attack",
+    "Zero": "Attack", "Flores": "Attack", "Osa": "Attack", "Sens": "Attack",
+    "Grim": "Attack", "Brava": "Attack", "Ram": "Attack", "Deimos": "Attack",
+    "Striker": "Attack", "Rauora": "Attack", "Snake": "Attack",
+    "Smoke": "Defense", "Mute": "Defense", "Castle": "Defense", "Pulse": "Defense",
+    "Doc": "Defense", "Rook": "Defense", "Kapkan": "Defense", "Tachanka": "Defense",
+    "Jager": "Defense", "Bandit": "Defense", "Frost": "Defense", "Valkyrie": "Defense",
+    "Caveira": "Defense", "Echo": "Defense", "Mira": "Defense", "Lesion": "Defense",
+    "Ela": "Defense", "Vigil": "Defense", "Maestro": "Defense", "Alibi": "Defense",
+    "Clash": "Defense", "Kaid": "Defense", "Mozzie": "Defense", "Warden": "Defense",
+    "Goyo": "Defense", "Wamai": "Defense", "Oryx": "Defense", "Melusi": "Defense",
+    "Aruni": "Defense", "Thunderbird": "Defense", "Thorn": "Defense", "Azami": "Defense",
+    "Solis": "Defense", "Fenrir": "Defense", "Tubarao": "Defense", "Sentry": "Defense",
+    "Skopos": "Defense", "Denari": "Defense"
+  },
+  "canon": {
+    "MONTAGNE": "Monty",
+    "DOKKAEBI": "Dokk",
+    "SOLID SNAKE": "Snake",
+    "SNAKE": "Snake"
+  }
+}

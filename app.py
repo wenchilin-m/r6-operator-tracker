@@ -1,0 +1,331 @@
+import json
+import os
+import sqlite3
+import subprocess
+import sys
+from datetime import datetime
+
+import pandas as pd
+import streamlit as st
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+DATA = os.path.join(HERE, "data")
+DB   = os.path.join(DATA, "siege.db")
+REF  = os.path.join(HERE, "reference")
+
+# ── Reference ──────────────────────────────────────────────────────────────────
+
+@st.cache_data
+def load_reference():
+    m = json.load(open(os.path.join(REF, "maps.json")))
+    return m["map_order"], m["map_picks_layout"]
+
+
+# ── Competition catalog ────────────────────────────────────────────────────────
+
+@st.cache_data
+def load_catalog():
+    path = os.path.join(DATA, "competitions.json")
+    if not os.path.exists(path):
+        return []
+    return json.load(open(path))
+
+
+def available_competitions():
+    """Return [(id, name)] for competitions that have a workbook on disk."""
+    catalog = {c["id"]: c for c in load_catalog()}
+    result = []
+    comps_dir = os.path.join(DATA, "competitions")
+    if not os.path.exists(comps_dir):
+        return result
+    for d in sorted(os.listdir(comps_dir), key=lambda x: int(x) if x.isdigit() else 0):
+        if not d.isdigit():
+            continue
+        cid = int(d)
+        wb_path = os.path.join(comps_dir, d, "workbook.xlsx")
+        if not os.path.exists(wb_path):
+            continue
+        name = catalog.get(cid, {}).get("name", f"Competition {cid}")
+        result.append((cid, name))
+    return result
+
+
+# ── DB queries ─────────────────────────────────────────────────────────────────
+
+def _conn():
+    if not os.path.exists(DB):
+        return None
+    c = sqlite3.connect(DB)
+    c.row_factory = sqlite3.Row
+    return c
+
+
+def _where(comp_ids):
+    if comp_ids is None:
+        return "", []
+    return f"WHERE comp_id IN ({','.join('?'*len(comp_ids))})", list(comp_ids)
+
+
+@st.cache_data(ttl=60)
+def query_map_picks(comp_ids_tuple):
+    conn = _conn()
+    if not conn:
+        return pd.DataFrame()
+    comp_ids = list(comp_ids_tuple) if comp_ids_tuple else None
+    w, params = _where(comp_ids)
+    df = pd.read_sql_query(
+        f"SELECT map, site, COUNT(*) AS rounds, SUM(def_win) AS def_wins FROM rounds {w} GROUP BY map, site",
+        conn, params=params
+    )
+    conn.close()
+    return df
+
+
+@st.cache_data(ttl=60)
+def query_ops(comp_ids_tuple):
+    conn = _conn()
+    if not conn:
+        return pd.DataFrame(), pd.DataFrame()
+    comp_ids = list(comp_ids_tuple) if comp_ids_tuple else None
+    w, params = _where(comp_ids)
+    picks = pd.read_sql_query(
+        f"SELECT map, side, operator, site, COUNT(*) AS appearances FROM picks {w} GROUP BY map, side, operator, site",
+        conn, params=params
+    )
+    bans = pd.read_sql_query(
+        f"SELECT map, side, operator, COUNT(*) AS times_banned, SUM(game_rounds) AS value FROM bans {w} GROUP BY map, side, operator",
+        conn, params=params
+    )
+    conn.close()
+    return picks, bans
+
+
+# ── App layout ─────────────────────────────────────────────────────────────────
+
+st.set_page_config(page_title="R6 Operator Tracker", page_icon="🎮", layout="wide")
+
+MAP_ORDER, MAP_PICKS_LAYOUT = load_reference()
+MAP_PICKS_ORDER = [m for m, _ in MAP_PICKS_LAYOUT]
+comps = available_competitions()
+
+with st.sidebar:
+    st.title("R6 Operator Tracker")
+
+    if not comps:
+        st.warning("No competition data found. Run `python3 run.py fetch --comp 100`.")
+        st.stop()
+
+    comp_map = {cid: name for cid, name in comps}  # id → name
+    options  = [cid for cid, _ in comps]
+    labels   = {cid: f"{name}" for cid, name in comps}
+
+    selected_ids = st.multiselect(
+        "Competitions",
+        options=options,
+        default=options,
+        format_func=lambda cid: labels[cid],
+    )
+
+    page = st.radio("View", ["Map Win Rates", "Operator Meta"])
+
+    # Download only available when exactly one competition is selected
+    if len(selected_ids) == 1:
+        cid = selected_ids[0]
+        wb_path = os.path.join(DATA, "competitions", str(cid), "workbook.xlsx")
+        if os.path.exists(wb_path):
+            with open(wb_path, "rb") as f:
+                st.download_button(
+                    label="Download xlsx",
+                    data=f,
+                    file_name=f"Siege Stats - Competition {cid}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+
+# comp_ids_tuple: None = all competitions, tuple = selected subset
+all_selected = set(selected_ids) == set(options)
+comp_ids_tuple = None if all_selected else tuple(selected_ids)
+
+if not selected_ids:
+    st.info("Select at least one competition in the sidebar.")
+    st.stop()
+
+if all_selected:
+    caption = "All competitions"
+elif len(selected_ids) == 1:
+    caption = comp_map[selected_ids[0]]
+else:
+    caption = f"{len(selected_ids)} competitions selected"
+
+st.caption(caption)
+
+# ── Page: Map Win Rates ────────────────────────────────────────────────────────
+
+if page == "Map Win Rates":
+    st.header("Map & Site Win Rates")
+    st.caption("Defender win % across selected competition(s)")
+
+    df_rounds = query_map_picks(comp_ids_tuple)
+
+    if df_rounds.empty:
+        st.info("No round data available.")
+    else:
+        for map_name in MAP_PICKS_ORDER:
+            map_df = df_rounds[df_rounds["map"] == map_name]
+            total_rounds = int(map_df["rounds"].sum()) if not map_df.empty else 0
+            has_data = total_rounds > 0
+
+            with st.expander(map_name, expanded=has_data):
+                if not has_data:
+                    st.caption("Not played in selected competitions.")
+                    continue
+
+                total_wins = int(map_df["def_wins"].sum())
+                map_wr = round(100 * total_wins / total_rounds) if total_rounds else 0
+
+                mc1, mc2, _ = st.columns([1, 1, 4])
+                mc1.metric("Rounds", total_rounds)
+                mc2.metric("Def win rate", f"{map_wr}%")
+
+                site_rows = map_df[map_df["site"].notna()].copy()
+                site_rows["win_rate"] = (
+                    100 * site_rows["def_wins"] / site_rows["rounds"]
+                ).round().astype(int)
+                site_rows = site_rows[["site", "rounds", "win_rate"]].rename(
+                    columns={"site": "Site", "rounds": "Rounds", "win_rate": "Win Rate %"}
+                ).reset_index(drop=True)
+
+                if not site_rows.empty:
+                    styler = site_rows.style.background_gradient(
+                        subset=["Win Rate %"], cmap="RdYlGn", vmin=30, vmax=70
+                    ).format({"Win Rate %": "{}%"})
+                    st.dataframe(styler, use_container_width=True, hide_index=True)
+
+# ── Page: Operator Meta ────────────────────────────────────────────────────────
+
+elif page == "Operator Meta":
+    selected_map = st.selectbox("Map", MAP_ORDER)
+
+    df_picks, df_bans = query_ops(comp_ids_tuple)
+
+    # Map-level metrics from rounds
+    df_rounds = query_map_picks(comp_ids_tuple)
+    map_rounds_df = df_rounds[df_rounds["map"] == selected_map]
+    total_rounds = int(map_rounds_df["rounds"].sum()) if not map_rounds_df.empty else 0
+    total_wins   = int(map_rounds_df["def_wins"].sum()) if not map_rounds_df.empty else 0
+    map_wr = round(100 * total_wins / total_rounds) if total_rounds else None
+
+    m1, m2, _ = st.columns([1, 1, 4])
+    m1.metric("Rounds played", total_rounds if total_rounds else "—")
+    m2.metric("Def win rate", f"{map_wr}%" if map_wr is not None else "—")
+
+    # Site deviations as metrics
+    if not map_rounds_df.empty and total_rounds > 0:
+        map_wr_val = 100 * total_wins / total_rounds
+        site_devs = []
+        for _, row in map_rounds_df.iterrows():
+            if row["site"] and row["rounds"] > 0:
+                site_wr = 100 * row["def_wins"] / row["rounds"]
+                dev = (site_wr - map_wr_val) * 100 * (row["rounds"] / total_rounds)
+                site_devs.append((row["site"], dev))
+        if site_devs:
+            dev_cols = st.columns(len(site_devs))
+            for col, (site, dev) in zip(dev_cols, site_devs):
+                col.metric(site, f"{dev:+.1f}")
+
+    def ops_table(side):
+        p = df_picks[(df_picks["map"] == selected_map) & (df_picks["side"] == side)] if not df_picks.empty else pd.DataFrame()
+        b = df_bans[(df_bans["map"] == selected_map) & (df_bans["side"] == side)] if not df_bans.empty else pd.DataFrame()
+
+        if p.empty and b.empty:
+            st.info(f"No {side} data.")
+            return
+
+        # Pivot picks to wide (operator × site)
+        if not p.empty:
+            wide = p.pivot_table(index="operator", columns="site", values="appearances",
+                                 aggfunc="sum", fill_value=0).reset_index()
+        else:
+            wide = pd.DataFrame(columns=["operator"])
+
+        # Merge bans
+        if not b.empty:
+            b_sub = b[["operator", "times_banned", "value"]]
+            df = wide.merge(b_sub, on="operator", how="outer").fillna(0)
+        else:
+            df = wide.copy()
+            df["times_banned"] = 0
+            df["value"] = 0
+
+        df["times_banned"] = df["times_banned"].astype(int)
+        df["value"]        = df["value"].astype(int)
+
+        site_cols = [c for c in df.columns if c not in ["operator", "times_banned", "value"]]
+        for s in site_cols:
+            df[s] = df[s].astype(int)
+
+        # Priority = Value + site picks
+        prio_cols = [f"{s} ★" for s in site_cols]
+        for s, p_col in zip(site_cols, prio_cols):
+            df[p_col] = df["value"] + df[s]
+
+        display_cols = ["operator", "times_banned", "value"] + prio_cols
+        df = df[display_cols].sort_values("times_banned", ascending=False).reset_index(drop=True)
+        df.columns = ["Operator", "Times Banned", "Value"] + prio_cols
+
+        styler = (
+            df.style
+            .background_gradient(subset=["Times Banned"], cmap="YlOrRd")
+            .background_gradient(subset=prio_cols, cmap="RdYlGn")
+            .format(precision=0)
+        )
+        st.dataframe(styler, use_container_width=True, hide_index=True)
+
+    col_def, col_atk = st.columns(2)
+    with col_def:
+        st.subheader("Defense")
+        ops_table("Defense")
+    with col_atk:
+        st.subheader("Attack")
+        ops_table("Attack")
+
+# ── Page: Data ─────────────────────────────────────────────────────────────────
+
+else:
+    st.header("Data")
+
+    if len(selected_ids) != 1:
+        st.info("Select exactly one competition in the sidebar to rebuild its workbook.")
+    else:
+        cid = selected_ids[0]
+        cname = comp_map[cid]
+        conn = _conn()
+        if conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM processed_matches WHERE comp_id=?", (cid,)
+            ).fetchone()
+            match_count = row[0] if row else 0
+            conn.close()
+            st.caption(f"{match_count} matches processed for {cname}")
+        else:
+            st.caption("siege.db not found — run fetch first")
+
+        st.info("Fetches all matches from siege.gg and rebuilds the workbook. Takes ~1–2 minutes.")
+
+        if st.button("Rebuild from siege.gg", type="primary"):
+            log_box = st.empty()
+            lines = []
+            proc = subprocess.Popen(
+                [sys.executable, os.path.join(HERE, "run.py"),
+                 "refresh", "--comp", str(cid)],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, cwd=HERE,
+            )
+            for line in proc.stdout:
+                lines.append(line.rstrip())
+                log_box.code("\n".join(lines), language=None)
+            proc.wait()
+            if proc.returncode == 0:
+                st.success("Done.")
+                st.cache_data.clear()
+            else:
+                st.error("Build failed — check log above.")
