@@ -8,6 +8,7 @@ from datetime import datetime
 
 import pandas as pd
 import streamlit as st
+from matplotlib.colors import LinearSegmentedColormap
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(HERE, "data")
@@ -129,12 +130,233 @@ def query_ops(comp_ids_tuple):
 
 st.set_page_config(page_title="R6 Operator Tracker", page_icon="🎮", layout="wide")
 
+# ── Elegant console theme ───────────────────────────────────────────────────────
+# Recreates the "console / light" direction from the Claude Design handoff:
+# cool paper canvas, ruled-grid texture, near-black ink, muted clay accent,
+# mono-forward numerals (Geist Mono), Newsreader-italic accents.
+
+# Clay-diverging heatmap, lifted from the design's palette engine (sRGB stops):
+# clay (low) → cream (neutral) → teal (high). Used for every heat cell.
+CLAY = LinearSegmentedColormap.from_list("r6_clay", [
+    (0.00, "#965039"), (0.27, "#c7967c"), (0.50, "#ede7db"),
+    (0.73, "#89a89e"), (1.00, "#34675d"),
+])
+
+
+def inject_theme():
+    st.html(
+        """
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;450;500;600;700&family=Geist+Mono:wght@400;500&family=Newsreader:ital,opsz,wght@1,6..72,400;1,6..72,500&display=swap');
+:root {
+  --ff-sans:"Geist", system-ui, sans-serif;
+  --ff-mono:"Geist Mono", ui-monospace, monospace;
+  --ff-serif:"Newsreader", Georgia, serif;
+  --bg:#f3f4f3; --panel:#fbfbfa; --card:#ffffff;
+  --ink:#16181a; --ink-2:#5d6166; --ink-3:#969a9e;
+  --line:#e2e4e3; --line-2:#eceeed;
+  --accent:#b05a44; --accent-soft:#f1e0db; --r:4px;
+}
+
+/* canvas + base type — console ruled-grid texture */
+.stApp {
+  color:var(--ink);
+  background-color:var(--bg);
+  background-image:
+    linear-gradient(to right, var(--line-2) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--line-2) 1px, transparent 1px);
+  background-size:48px 48px;
+}
+[data-testid="stHeader"] { background:transparent; }
+/* base sans — !important to beat Streamlit's per-element font rules */
+.stApp, .stApp p, .stApp li, .stApp a, .stApp button, .stApp input,
+.stApp select, .stApp textarea, .stApp h1, .stApp h2, .stApp h3, .stApp h4,
+.stApp h5, .stMarkdown, [data-testid="stMarkdownContainer"],
+.r6-title, .r6-section-head h3, .r6-colhead {
+  font-family:var(--ff-sans) !important;
+}
+/* mono — labels, eyebrows, numeric chrome */
+.r6-wordmark .tag, .r6-eyebrow, .r6-sub, .r6-delta-label, .r6-delta-cell .num,
+.r6-side-foot, [data-testid="stSidebar"] label, [data-testid="stWidgetLabel"] p,
+[data-testid="stMetricLabel"] p {
+  font-family:var(--ff-mono) !important;
+}
+/* serif italic accents */
+.r6-title .em, .r6-section-head .em { font-family:var(--ff-serif) !important; }
+/* console: stat numerals are mono */
+[data-testid="stMetricValue"] { font-family:var(--ff-mono) !important; }
+
+/* ---------- sidebar ---------- */
+[data-testid="stSidebar"] {
+  background:var(--panel); border-right:1px solid var(--line);
+}
+[data-testid="stSidebar"] .block-container { padding-top:30px; }
+.r6-wordmark { display:flex; flex-direction:column; gap:4px; margin-bottom:26px; }
+.r6-wordmark .tag {
+  font-family:var(--ff-mono); font-size:10.5px; letter-spacing:.22em;
+  text-transform:uppercase; color:var(--accent);
+}
+.r6-wordmark h1 {
+  margin:0; font-size:17px; font-weight:500; letter-spacing:-.02em;
+  line-height:1.2; color:var(--ink); padding:0;
+  font-family:var(--ff-mono) !important;
+}
+.r6-side-foot {
+  margin-top:18px; color:var(--ink-3); font-family:var(--ff-mono); font-size:11px;
+}
+/* sidebar field labels (multiselect / radio headers) */
+[data-testid="stSidebar"] label, [data-testid="stWidgetLabel"] p {
+  font-family:var(--ff-mono); font-size:11px; letter-spacing:.14em;
+  text-transform:uppercase; color:var(--ink-3); font-weight:500;
+}
+
+/* ---------- page header ---------- */
+.r6-pagehead { margin:6px 0 34px; }
+.r6-eyebrow {
+  font-family:var(--ff-mono); font-size:11.5px; letter-spacing:.16em;
+  text-transform:uppercase; color:var(--accent); margin-bottom:14px;
+}
+.r6-title {
+  margin:0; font-size:46px; font-weight:500; letter-spacing:-.035em;
+  line-height:1.02; color:var(--ink);
+}
+.r6-title .em, .r6-section-head .em {
+  font-family:var(--ff-serif); font-style:italic; font-weight:400; color:var(--ink-2);
+}
+.r6-sub {
+  margin-top:14px; color:var(--ink-3); font-family:var(--ff-mono);
+  font-size:13px; letter-spacing:.02em;
+}
+
+/* ---------- section heads ---------- */
+.r6-section-head { margin:8px 0 18px; }
+.r6-section-head h3 {
+  margin:0; font-size:24px; font-weight:600; letter-spacing:-.015em; color:var(--ink);
+}
+.r6-section-head p { margin:8px 0 0; color:var(--ink-2); font-size:14px; }
+
+/* ---------- metrics (stat row) ---------- */
+[data-testid="stMetric"] {
+  background:transparent; border:none; padding:0;
+}
+[data-testid="stMetricLabel"] p {
+  font-family:var(--ff-mono) !important; font-size:11px !important; letter-spacing:.12em;
+  text-transform:uppercase; color:var(--ink-3) !important; font-weight:500 !important;
+}
+[data-testid="stMetricValue"] {
+  font-family:var(--ff-mono); font-size:38px; font-weight:500;
+  letter-spacing:-.02em; color:var(--ink); line-height:1;
+}
+
+/* ---------- delta-by-site grid ---------- */
+.r6-delta-label {
+  font-family:var(--ff-mono); font-size:11px; letter-spacing:.12em;
+  text-transform:uppercase; color:var(--ink-3); margin:8px 0 14px;
+}
+.r6-delta-grid {
+  display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:1px;
+  background:var(--line); border:1px solid var(--line); border-radius:var(--r);
+  overflow:hidden; margin-bottom:8px;
+}
+.r6-delta-cell { background:var(--card); padding:20px 22px; }
+.r6-delta-cell .site { color:var(--ink-2); font-size:13.5px; margin-bottom:10px; }
+.r6-delta-cell .num {
+  font-family:var(--ff-mono); font-size:30px; font-weight:500; letter-spacing:-.01em;
+}
+.r6-delta-cell .num .arrow { font-size:18px; vertical-align:2px; margin-right:4px; }
+.r6-pos-up { color:#4f7a4a; }
+.r6-pos-down { color:var(--accent); }
+
+/* ---------- subheaders (Defense / Attack) ---------- */
+.r6-colhead {
+  font-size:22px; font-weight:600; letter-spacing:-.015em; color:var(--ink);
+  margin:6px 0 14px;
+}
+
+/* ---------- expander ---------- */
+[data-testid="stExpander"] {
+  border:1px solid var(--line); border-radius:var(--r); background:var(--card);
+}
+[data-testid="stExpander"] summary { color:var(--ink); font-size:14.5px; }
+[data-testid="stExpander"] summary:hover { color:var(--accent); }
+
+/* ---------- dataframe ---------- */
+[data-testid="stDataFrame"] { border:1px solid var(--line); border-radius:var(--r); }
+
+/* ---------- download button ---------- */
+[data-testid="stDownloadButton"] button,
+[data-testid="stBaseButton-secondary"] {
+  border:1px solid var(--line); background:var(--card); color:var(--ink);
+  border-radius:var(--r); font-family:var(--ff-mono); font-size:12.5px;
+  letter-spacing:.02em;
+}
+[data-testid="stLinkButton"] a {
+  border:1px solid var(--line); background:var(--panel); color:var(--ink);
+  border-radius:var(--r); font-family:var(--ff-mono); font-size:12.5px;
+  letter-spacing:.02em; text-decoration:none;
+}
+[data-testid="stDownloadButton"] button:hover,
+[data-testid="stLinkButton"] a:hover { border-color:var(--ink-3); color:var(--ink); }
+
+/* hairline divider */
+hr { border:none; border-top:1px solid var(--line); }
+</style>
+"""
+    )
+
+
+_TITLE_YEAR = re.compile(r"\b(\d{4})\b")
+
+
+def format_title(name):
+    """Roman lead + serif-italic accent: split on the 4-digit year so the
+    year (+ any trailing phase) becomes the lyrical accent. Mirrors the design's
+    formatTitle so it generalizes to any competition name."""
+    m = _TITLE_YEAR.search(name)
+    if not m:
+        parts = name.strip().split()
+        if len(parts) <= 1:
+            return name, ""
+        return " ".join(parts[:-1]), parts[-1]
+    return name[: m.start()].strip(), name[m.start():].strip()
+
+
+def page_head(eyebrow, title, sub):
+    lead, accent = format_title(title)
+    accent_html = f' <span class="em">{accent}</span>' if accent else ""
+    st.markdown(
+        f'<div class="r6-pagehead">'
+        f'<div class="r6-eyebrow">{eyebrow}</div>'
+        f'<h1 class="r6-title">{lead}{accent_html}</h1>'
+        + (f'<div class="r6-sub">{sub}</div>' if sub else "")
+        + "</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def section_head(lead, accent, desc):
+    accent_html = f' <span class="em">{accent}</span>' if accent else ""
+    st.markdown(
+        f'<div class="r6-section-head"><h3>{lead}{accent_html}</h3>'
+        f'<p>{desc}</p></div>',
+        unsafe_allow_html=True,
+    )
+
+
+inject_theme()
+
 MAP_ORDER, MAP_PICKS_LAYOUT = load_reference()
 MAP_PICKS_ORDER = [m for m, _ in MAP_PICKS_LAYOUT]
 comps = available_competitions()
 
 with st.sidebar:
-    st.title("R6 Operator Tracker")
+    st.markdown(
+        '<div class="r6-wordmark">'
+        '<span class="tag">R6 · Operator Tracker</span>'
+        '<h1>Match Analytics</h1>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
 
     if not comps:
         st.warning("No competition data found. Run `python3 run.py fetch --comp 100`.")
@@ -151,7 +373,9 @@ with st.sidebar:
         format_func=lambda cid: labels[cid],
     )
 
-    page = st.radio("View", ["Map Win Rates", "Operator Meta"])
+    page = st.radio("Report Type", ["Operator Tracker", "Map Performance"])
+
+    st.link_button("View on SiegeGG ↗", "https://siege.gg/competitions")
 
     # Download only available when exactly one competition is selected
     if len(selected_ids) == 1:
@@ -160,7 +384,7 @@ with st.sidebar:
         if os.path.exists(wb_path):
             with open(wb_path, "rb") as f:
                 st.download_button(
-                    label="Download xlsx",
+                    label="Export Report",
                     data=f,
                     file_name=f"Siege Stats - Competition {cid}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -187,15 +411,17 @@ else:
     comp_title = f"{len(selected_ids)} Competitions"
     date_note  = ""
 
-st.title(comp_title)
-if date_note:
-    st.caption(date_note)
+if all_selected or len(selected_ids) != 1:
+    sub = f"{len(selected_ids)} competitions selected" if not all_selected else "All competitions"
+else:
+    sub = date_note
+page_head("Tournament", comp_title, sub)
+
 
 # ── Page: Map Win Rates ────────────────────────────────────────────────────────
 
-if page == "Map Win Rates":
-    st.header("Map & Site Win Rates")
-    st.caption("Defender win % across selected competition(s)")
+if page == "Map Performance":
+    section_head("Map &amp; Site", "Win Rates", "Defender win % across the selected competition(s).")
 
     df_rounds = query_map_picks(comp_ids_tuple)
 
@@ -222,10 +448,13 @@ if page == "Map Win Rates":
         if summary:
             summary_df = pd.DataFrame(summary).sort_values("Def Win Rate", ascending=False).reset_index(drop=True)
             styler = summary_df.style.background_gradient(
-                subset=["Def Win Rate"], cmap="RdYlGn", vmin=30, vmax=70
+                subset=["Def Win Rate"], cmap=CLAY, vmin=30, vmax=70
             ).format({"Def Win Rate": "{}%"})
             st.dataframe(styler, use_container_width=True, hide_index=True)
             st.divider()
+
+            section_head("Site Win-Rate", "Delta",
+                         "Bomb sites ranked by how far their win rate deviates from the map baseline.")
 
         # Flat site-level detail table — all maps and sites in one view
         detail = []
@@ -250,10 +479,11 @@ if page == "Map Win Rates":
 
         if detail:
             detail_df = pd.DataFrame(detail).sort_values("Win Rate Delta", ascending=False).reset_index(drop=True)
+            _dmax = detail_df["Win Rate Delta"].abs().max() or 1
             styler = detail_df.style.background_gradient(
-                subset=["Win Rate %"], cmap="RdYlGn", vmin=30, vmax=70
+                subset=["Win Rate %"], cmap=CLAY, vmin=30, vmax=70
             ).background_gradient(
-                subset=["Win Rate Delta"], cmap="RdYlGn"
+                subset=["Win Rate Delta"], cmap=CLAY, vmin=-_dmax, vmax=_dmax
             ).format({"Win Rate %": "{}%", "Win Rate Delta": "{:+.1f}"})
             st.dataframe(styler, use_container_width=True, hide_index=True)
 
@@ -271,7 +501,7 @@ if page == "Map Win Rates":
 
 # ── Page: Operator Meta ────────────────────────────────────────────────────────
 
-elif page == "Operator Meta":
+elif page == "Operator Tracker":
     selected_map = st.selectbox("Map", MAP_ORDER)
 
     df_picks, df_bans = query_ops(comp_ids_tuple)
@@ -297,10 +527,21 @@ elif page == "Operator Meta":
                 dev = (site_wr - map_wr_val) * 100 * (row["rounds"] / total_rounds)
                 site_devs.append((row["site"], dev))
         if site_devs:
-            st.caption("Win Rate Delta by Site")
-            dev_cols = st.columns(len(site_devs))
-            for col, (site, dev) in zip(dev_cols, site_devs):
-                col.metric(site, f"{dev:+.1f}")
+            st.markdown('<div class="r6-delta-label">Win Rate Δ by Site</div>',
+                        unsafe_allow_html=True)
+            cells = ""
+            for site, dev in site_devs:
+                pos = dev >= 0
+                cls = "r6-pos-up" if pos else "r6-pos-down"
+                arrow = "↑" if pos else "↓"
+                sign = "+" if pos else ""
+                cells += (
+                    f'<div class="r6-delta-cell"><div class="site">{site}</div>'
+                    f'<div class="num {cls}"><span class="arrow">{arrow}</span>'
+                    f'{sign}{dev:.1f}</div></div>'
+                )
+            st.markdown(f'<div class="r6-delta-grid">{cells}</div>',
+                        unsafe_allow_html=True)
             with st.expander("What is Win Rate Delta?"):
                 st.markdown(
                     "**Win Rate Delta** measures how much defenders over- or under-perform "
@@ -357,19 +598,16 @@ elif page == "Operator Meta":
 
         styler = (
             df.style
-            .background_gradient(subset=["Times Banned"], cmap="YlOrRd")
-            .background_gradient(subset=prio_cols, cmap="RdYlGn")
+            .background_gradient(subset=["Times Banned"], cmap=CLAY)
+            .background_gradient(subset=prio_cols, cmap=CLAY)
             .format(precision=0)
         )
         st.dataframe(styler, use_container_width=True, hide_index=True)
 
-    col_def, col_atk = st.columns(2)
-    with col_def:
-        st.subheader("Defense")
-        ops_table("Defense")
-    with col_atk:
-        st.subheader("Attack")
-        ops_table("Attack")
+    st.markdown('<div class="r6-colhead">Defense</div>', unsafe_allow_html=True)
+    ops_table("Defense")
+    st.markdown('<div class="r6-colhead">Attack</div>', unsafe_allow_html=True)
+    ops_table("Attack")
 
 # ── Page: Data ─────────────────────────────────────────────────────────────────
 
