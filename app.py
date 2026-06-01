@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import sqlite3
 import subprocess
 import sys
@@ -31,6 +32,27 @@ def load_catalog():
     return json.load(open(path))
 
 
+_MONTHS = {"Jan":1,"Feb":2,"Mar":3,"Apr":4,"May":5,"Jun":6,
+           "Jul":7,"Aug":8,"Sep":9,"Oct":10,"Nov":11,"Dec":12}
+
+def _comp_end_key(dates_str, year=2026):
+    """Return a sortable int (YYYYMMDD) from the END date of 'May 8 – 17', or 0 if unparseable."""
+    if not dates_str:
+        return 0
+    try:
+        parts = re.split(r'\s*[–-]\s*', dates_str.strip())
+        start_part = parts[0].split()
+        start_month = _MONTHS[start_part[0][:3]]
+        end_part = parts[1].split()
+        if len(end_part) == 2:
+            end_month, end_day = _MONTHS[end_part[0][:3]], int(end_part[1])
+        else:
+            end_month, end_day = start_month, int(end_part[0])
+        return year * 10000 + end_month * 100 + end_day
+    except (KeyError, ValueError, IndexError):
+        return 0
+
+
 def available_competitions():
     """Return [(id, name)] for competitions that have a workbook on disk."""
     catalog = {c["id"]: c for c in load_catalog()}
@@ -45,9 +67,12 @@ def available_competitions():
         wb_path = os.path.join(comps_dir, d, "workbook.xlsx")
         if not os.path.exists(wb_path):
             continue
-        name = catalog.get(cid, {}).get("name", f"Competition {cid}")
-        result.append((cid, name))
-    return result
+        name  = catalog.get(cid, {}).get("name", f"Competition {cid}")
+        dates = catalog.get(cid, {}).get("dates", "")
+        result.append((cid, name, dates))
+    # Sort most recent first
+    result.sort(key=lambda x: _comp_end_key(x[2]), reverse=True)
+    return [(cid, name) for cid, name, _ in result]
 
 
 # ── DB queries ─────────────────────────────────────────────────────────────────
@@ -115,9 +140,9 @@ with st.sidebar:
         st.warning("No competition data found. Run `python3 run.py fetch --comp 100`.")
         st.stop()
 
-    comp_map = {cid: name for cid, name in comps}  # id → name
+    comp_map = {cid: name for cid, name in comps}
     options  = [cid for cid, _ in comps]
-    labels   = {cid: f"{name}" for cid, name in comps}
+    labels   = {cid: name for cid, name in comps}
 
     selected_ids = st.multiselect(
         "Competitions",
@@ -149,14 +174,22 @@ if not selected_ids:
     st.info("Select at least one competition in the sidebar.")
     st.stop()
 
-if all_selected:
-    caption = "All competitions"
-elif len(selected_ids) == 1:
-    caption = comp_map[selected_ids[0]]
-else:
-    caption = f"{len(selected_ids)} competitions selected"
+catalog_lookup = {c["id"]: c for c in load_catalog()}
 
-st.caption(caption)
+if all_selected:
+    comp_title = "All Competitions"
+    date_note  = ""
+elif len(selected_ids) == 1:
+    cid = selected_ids[0]
+    comp_title = comp_map[cid]
+    date_note  = catalog_lookup.get(cid, {}).get("dates", "")
+else:
+    comp_title = f"{len(selected_ids)} Competitions"
+    date_note  = ""
+
+st.title(comp_title)
+if date_note:
+    st.caption(date_note)
 
 # ── Page: Map Win Rates ────────────────────────────────────────────────────────
 
@@ -169,36 +202,72 @@ if page == "Map Win Rates":
     if df_rounds.empty:
         st.info("No round data available.")
     else:
+        # Cross-map summary table
+        summary = []
         for map_name in MAP_PICKS_ORDER:
             map_df = df_rounds[df_rounds["map"] == map_name]
             total_rounds = int(map_df["rounds"].sum()) if not map_df.empty else 0
-            has_data = total_rounds > 0
+            if total_rounds == 0:
+                continue
+            total_wins = int(map_df["def_wins"].sum())
+            map_wr = round(100 * total_wins / total_rounds)
+            site_rows = map_df[map_df["site"].notna()].copy()
+            site_rows["wr"] = (100 * site_rows["def_wins"] / site_rows["rounds"]).round().astype(int)
+            site_rows["delta"] = (site_rows["wr"] - map_wr) * 100 * (site_rows["rounds"] / total_rounds)
+            best  = site_rows.loc[site_rows["delta"].idxmax(), "site"] if not site_rows.empty else "—"
+            worst = site_rows.loc[site_rows["delta"].idxmin(), "site"] if not site_rows.empty else "—"
+            summary.append({"Map": map_name, "Rounds": total_rounds,
+                            "Def Win Rate": map_wr, "Best Def Site": best, "Best Atk Site": worst})
 
-            with st.expander(map_name, expanded=has_data):
-                if not has_data:
-                    st.caption("Not played in selected competitions.")
-                    continue
+        if summary:
+            summary_df = pd.DataFrame(summary).sort_values("Def Win Rate", ascending=False).reset_index(drop=True)
+            styler = summary_df.style.background_gradient(
+                subset=["Def Win Rate"], cmap="RdYlGn", vmin=30, vmax=70
+            ).format({"Def Win Rate": "{}%"})
+            st.dataframe(styler, use_container_width=True, hide_index=True)
+            st.divider()
 
-                total_wins = int(map_df["def_wins"].sum())
-                map_wr = round(100 * total_wins / total_rounds) if total_rounds else 0
+        # Flat site-level detail table — all maps and sites in one view
+        detail = []
+        for map_name in MAP_PICKS_ORDER:
+            map_df = df_rounds[df_rounds["map"] == map_name]
+            total_rounds = int(map_df["rounds"].sum()) if not map_df.empty else 0
+            if total_rounds == 0:
+                continue
+            total_wins = int(map_df["def_wins"].sum())
+            map_wr = round(100 * total_wins / total_rounds)
+            site_rows = map_df[map_df["site"].notna()].copy()
+            for _, row in site_rows.iterrows():
+                site_wr = round(100 * row["def_wins"] / row["rounds"])
+                delta = (site_wr - map_wr) * 100 * (row["rounds"] / total_rounds)
+                detail.append({
+                    "Map": map_name,
+                    "Site": row["site"],
+                    "Rounds": int(row["rounds"]),
+                    "Win Rate %": site_wr,
+                    "Win Rate Delta": round(delta, 1),
+                })
 
-                mc1, mc2, _ = st.columns([1, 1, 4])
-                mc1.metric("Rounds", total_rounds)
-                mc2.metric("Def win rate", f"{map_wr}%")
+        if detail:
+            detail_df = pd.DataFrame(detail).sort_values("Win Rate Delta", ascending=False).reset_index(drop=True)
+            styler = detail_df.style.background_gradient(
+                subset=["Win Rate %"], cmap="RdYlGn", vmin=30, vmax=70
+            ).background_gradient(
+                subset=["Win Rate Delta"], cmap="RdYlGn"
+            ).format({"Win Rate %": "{}%", "Win Rate Delta": "{:+.1f}"})
+            st.dataframe(styler, use_container_width=True, hide_index=True)
 
-                site_rows = map_df[map_df["site"].notna()].copy()
-                site_rows["win_rate"] = (
-                    100 * site_rows["def_wins"] / site_rows["rounds"]
-                ).round().astype(int)
-                site_rows = site_rows[["site", "rounds", "win_rate"]].rename(
-                    columns={"site": "Site", "rounds": "Rounds", "win_rate": "Win Rate %"}
-                ).reset_index(drop=True)
-
-                if not site_rows.empty:
-                    styler = site_rows.style.background_gradient(
-                        subset=["Win Rate %"], cmap="RdYlGn", vmin=30, vmax=70
-                    ).format({"Win Rate %": "{}%"})
-                    st.dataframe(styler, use_container_width=True, hide_index=True)
+        with st.expander("What is Win Rate Delta?"):
+            st.markdown(
+                "**Win Rate Delta** measures how much defenders over- or under-perform "
+                "at each bomb site compared to the map average, scaled by how often "
+                "that site is played.\n\n"
+                "- **Positive (+)** — defenders win more rounds here than the map average. "
+                "This site has a structural defensive advantage.\n"
+                "- **Negative (−)** — defenders consistently lose more rounds here than average. "
+                "Attackers prefer to play this site.\n"
+                "- **Near zero** — this site plays roughly in line with the map average."
+            )
 
 # ── Page: Operator Meta ────────────────────────────────────────────────────────
 
@@ -220,17 +289,31 @@ elif page == "Operator Meta":
 
     # Site deviations as metrics
     if not map_rounds_df.empty and total_rounds > 0:
-        map_wr_val = 100 * total_wins / total_rounds
+        map_wr_val = round(100 * total_wins / total_rounds)
         site_devs = []
         for _, row in map_rounds_df.iterrows():
             if row["site"] and row["rounds"] > 0:
-                site_wr = 100 * row["def_wins"] / row["rounds"]
+                site_wr = round(100 * row["def_wins"] / row["rounds"])
                 dev = (site_wr - map_wr_val) * 100 * (row["rounds"] / total_rounds)
                 site_devs.append((row["site"], dev))
         if site_devs:
+            st.caption("Win Rate Delta by Site")
             dev_cols = st.columns(len(site_devs))
             for col, (site, dev) in zip(dev_cols, site_devs):
                 col.metric(site, f"{dev:+.1f}")
+            with st.expander("What is Win Rate Delta?"):
+                st.markdown(
+                    "**Win Rate Delta** measures how much defenders over- or under-perform "
+                    "at each bomb site compared to the map average, scaled by how often "
+                    "that site is played.\n\n"
+                    "- **Positive (+)** — defenders win more rounds here than the map average. "
+                    "This site has a structural defensive advantage; attackers tend to avoid banning it.\n"
+                    "- **Negative (−)** — defenders consistently lose more rounds here than average. "
+                    "Attackers prefer to play this site.\n"
+                    "- **Near zero** — this site plays roughly in line with the map average.\n\n"
+                    "Sites played rarely contribute less to the score than heavily contested ones, "
+                    "so the number reflects real competitive relevance."
+                )
 
     def ops_table(side):
         p = df_picks[(df_picks["map"] == selected_map) & (df_picks["side"] == side)] if not df_picks.empty else pd.DataFrame()
